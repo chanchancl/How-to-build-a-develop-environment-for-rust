@@ -8,7 +8,8 @@
 
 ## 准备步骤
 
-1. 运行命令 `curl -sSf https://sh.rustup.rs > rust.sh`
+1. 运行命令 `curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf > rust.sh && chmod +x rush.sh` 下载rust安装脚本
+
 2. 运行命令
 
 ```
@@ -19,7 +20,9 @@ sed -i 's/${RUSTUP_UPDATE_ROOT:-https:\/\/static.rust-lang.org\/rustup}/https:\/
 
 (optional)
 
-或者你可以选择使用这个库中提供的 [rust.sh](https://github.com/chanchancl/How-to-build-a-develop-environment-for-rust/blob/main/rust.sh)，但我还是推荐你自己修改一遍，以防rustup有后续更新
+[optional] 如果 step1.都无法下载，可以使用 `curl --proto '=https' --tlsv1.2 https://mirrors.ustc.edu.cn/misc/rustup-install.sh -sSf > rush.sh && chmod +x rush.sh` 来下载,注意这里下载的是没替换源的
+
+或者你可以选择使用这个库中提供的 [rust.sh](https://github.com/chanchancl/How-to-build-a-develop-environment-for-rust/blob/main/rust.sh)(替换过的)，但我还是推荐你自己修改一遍，以防rustup有后续更新
 
 3. 设置环境变量
 
@@ -37,4 +40,24 @@ export RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
 
 ## 检测
 
-1. 运行命令 `cargo version`, 若出现 cargo 1.56.0 (4ed5d137b 2021-10-04) (版本可能变化) 则说明安装成功
+1. 运行命令 `cargo version`, 若出现 cargo 1.69.0 (6e9a83356 2023-04-12) (版本可能变化) 则说明安装成功
+
+## 稀疏索引
+
+```
+cargo 1.68 版本开始支持稀疏索引：不再需要完整克隆 crates.io-index 仓库，可以加快获取包的速度。如果您的 cargo 版本大于等于 1.68，可以在 $HOME/.cargo/config 中添加如下内容：
+
+[source.crates-io]
+replace-with = 'ustc'
+
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
+```
+
+# 参考文献
+
+更多内容请参考
+
+* https://mirrors.ustc.edu.cn/help/rust-static.html
+
+* https://mirrors.ustc.edu.cn/help/crates.io-index.html

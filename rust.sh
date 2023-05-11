@@ -22,30 +22,51 @@ set -u
 # If RUSTUP_UPDATE_ROOT is unset or empty, default it.
 RUSTUP_UPDATE_ROOT="https://mirrors.ustc.edu.cn/rust-static/rustup"
 
-#XXX: If you change anything here, please make the same changes in setup_mode.rs
+# NOTICE: If you change anything here, please make the same changes in setup_mode.rs
 usage() {
-    cat 1>&2 <<EOF
-rustup-init 1.24.3 (c1c769109 2021-05-31)
+    cat <<EOF
+rustup-init 1.26.0 (577bf51ae 2023-04-05)
 The installer for rustup
 
 USAGE:
-    rustup-init [FLAGS] [OPTIONS]
-
-FLAGS:
-    -v, --verbose           Enable verbose output
-    -q, --quiet             Disable progress output
-    -y                      Disable confirmation prompt.
-        --no-modify-path    Don't configure the PATH environment variable
-    -h, --help              Prints help information
-    -V, --version           Prints version information
+    rustup-init [OPTIONS]
 
 OPTIONS:
-        --default-host <default-host>              Choose a default host triple
-        --default-toolchain <default-toolchain>    Choose a default toolchain to install
-        --default-toolchain none                   Do not install any toolchains
-        --profile [minimal|default|complete]       Choose a profile
-    -c, --component <components>...                Component name to also install
-    -t, --target <targets>...                      Target name to also install
+    -v, --verbose
+            Enable verbose output
+
+    -q, --quiet
+            Disable progress output
+
+    -y
+            Disable confirmation prompt.
+
+        --default-host <default-host>
+            Choose a default host triple
+
+        --default-toolchain <default-toolchain>
+            Choose a default toolchain to install. Use 'none' to not install any toolchains at all
+
+        --profile <profile>
+            [default: default] [possible values: minimal, default, complete]
+
+    -c, --component <components>...
+            Component name to also install
+
+    -t, --target <targets>...
+            Target name to also install
+
+        --no-update-default-toolchain
+            Don't update any existing default toolchain after install
+
+        --no-modify-path
+            Don't configure the PATH environment variable
+
+    -h, --help
+            Print help information
+
+    -V, --version
+            Print version information
 EOF
 }
 
@@ -72,7 +93,11 @@ main() {
     local _url="${RUSTUP_UPDATE_ROOT}/dist/${_arch}/rustup-init${_ext}"
 
     local _dir
-    _dir="$(ensure mktemp -d)"
+    if ! _dir="$(ensure mktemp -d)"; then
+        # Because the previous command ran in a subshell, we must manually
+        # propagate exit status.
+        exit 1
+    fi
     local _file="${_dir}/rustup-init${_ext}"
 
     local _ansi_escapes_are_valid=false
@@ -90,15 +115,32 @@ main() {
     local need_tty=yes
     for arg in "$@"; do
         case "$arg" in
-            -h|--help)
+            --help)
                 usage
                 exit 0
                 ;;
-            -y)
-                # user wants to skip the prompt -- we don't need /dev/tty
-                need_tty=no
-                ;;
             *)
+                OPTIND=1
+                if [ "${arg%%--*}" = "" ]; then
+                    # Long option (other than --help);
+                    # don't attempt to interpret it.
+                    continue
+                fi
+                while getopts :hy sub_arg "$arg"; do
+                    case "$sub_arg" in
+                        h)
+                            usage
+                            exit 0
+                            ;;
+                        y)
+                            # user wants to skip the prompt --
+                            # we don't need /dev/tty
+                            need_tty=no
+                            ;;
+                        *)
+                            ;;
+                        esac
+                done
                 ;;
         esac
     done
@@ -118,7 +160,7 @@ main() {
         exit 1
     fi
 
-    if [ "$need_tty" = "yes" ]; then
+    if [ "$need_tty" = "yes" ] && [ ! -t 0 ]; then
         # The installer is going to want to ask for confirmation by
         # reading stdin.  This script was piped into `sh` though and
         # doesn't have stdin to pass to its children. Instead we're going
@@ -270,7 +312,7 @@ get_architecture() {
             _ostype=unknown-illumos
             ;;
 
-        MINGW* | MSYS* | CYGWIN*)
+        MINGW* | MSYS* | CYGWIN* | Windows_NT)
             _ostype=pc-windows-gnu
             ;;
 
@@ -348,6 +390,9 @@ get_architecture() {
             ;;
         riscv64)
             _cputype=riscv64gc
+            ;;
+        loongarch64)
+            _cputype=loongarch64
             ;;
         *)
             err "unknown CPU type: $_cputype"
@@ -456,6 +501,7 @@ downloader() {
     local _ciphersuites
     local _err
     local _status
+    local _retry
     if check_cmd curl; then
         _dld=curl
     elif check_cmd wget; then
@@ -467,19 +513,21 @@ downloader() {
     if [ "$1" = --check ]; then
         need_cmd "$_dld"
     elif [ "$_dld" = curl ]; then
+        check_curl_for_retry_support
+        _retry="$RETVAL"
         get_ciphersuites_for_curl
         _ciphersuites="$RETVAL"
         if [ -n "$_ciphersuites" ]; then
-            _err=$(curl --proto '=https' --tlsv1.2 --ciphers "$_ciphersuites" --silent --show-error --fail --location "$1" --output "$2" 2>&1)
+            _err=$(curl $_retry --proto '=https' --tlsv1.2 --ciphers "$_ciphersuites" --silent --show-error --fail --location "$1" --output "$2" 2>&1)
             _status=$?
         else
             echo "Warning: Not enforcing strong cipher suites for TLS, this is potentially less secure"
             if ! check_help_for "$3" curl --proto --tlsv1.2; then
                 echo "Warning: Not enforcing TLS v1.2, this is potentially less secure"
-                _err=$(curl --silent --show-error --fail --location "$1" --output "$2" 2>&1)
+                _err=$(curl $_retry --silent --show-error --fail --location "$1" --output "$2" 2>&1)
                 _status=$?
             else
-                _err=$(curl --proto '=https' --tlsv1.2 --silent --show-error --fail --location "$1" --output "$2" 2>&1)
+                _err=$(curl $_retry --proto '=https' --tlsv1.2 --silent --show-error --fail --location "$1" --output "$2" 2>&1)
                 _status=$?
             fi
         fi
@@ -491,20 +539,26 @@ downloader() {
         fi
         return $_status
     elif [ "$_dld" = wget ]; then
-        get_ciphersuites_for_wget
-        _ciphersuites="$RETVAL"
-        if [ -n "$_ciphersuites" ]; then
-            _err=$(wget --https-only --secure-protocol=TLSv1_2 --ciphers "$_ciphersuites" "$1" -O "$2" 2>&1)
+        if [ "$(wget -V 2>&1|head -2|tail -1|cut -f1 -d" ")" = "BusyBox" ]; then
+            echo "Warning: using the BusyBox version of wget.  Not enforcing strong cipher suites for TLS or TLS v1.2, this is potentially less secure"
+            _err=$(wget "$1" -O "$2" 2>&1)
             _status=$?
         else
-            echo "Warning: Not enforcing strong cipher suites for TLS, this is potentially less secure"
-            if ! check_help_for "$3" wget --https-only --secure-protocol; then
-                echo "Warning: Not enforcing TLS v1.2, this is potentially less secure"
-                _err=$(wget "$1" -O "$2" 2>&1)
+            get_ciphersuites_for_wget
+            _ciphersuites="$RETVAL"
+            if [ -n "$_ciphersuites" ]; then
+                _err=$(wget --https-only --secure-protocol=TLSv1_2 --ciphers "$_ciphersuites" "$1" -O "$2" 2>&1)
                 _status=$?
             else
-                _err=$(wget --https-only --secure-protocol=TLSv1_2 "$1" -O "$2" 2>&1)
-                _status=$?
+                echo "Warning: Not enforcing strong cipher suites for TLS, this is potentially less secure"
+                if ! check_help_for "$3" wget --https-only --secure-protocol; then
+                    echo "Warning: Not enforcing TLS v1.2, this is potentially less secure"
+                    _err=$(wget "$1" -O "$2" 2>&1)
+                    _status=$?
+                else
+                    _err=$(wget --https-only --secure-protocol=TLSv1_2 "$1" -O "$2" 2>&1)
+                    _status=$?
+                fi
             fi
         fi
         if [ -n "$_err" ]; then
@@ -564,7 +618,7 @@ check_help_for() {
     esac
 
     for _arg in "$@"; do
-        if ! "$_cmd" --help $_category | grep -q -- "$_arg"; then
+        if ! "$_cmd" --help "$_category" | grep -q -- "$_arg"; then
             return 1
         fi
     done
@@ -572,8 +626,23 @@ check_help_for() {
     true # not strictly needed
 }
 
+# Check if curl supports the --retry flag, then pass it to the curl invocation.
+check_curl_for_retry_support() {
+    local _retry_supported=""
+    # "unspecified" is for arch, allows for possibility old OS using macports, homebrew, etc.
+    if check_help_for "notspecified" "curl" "--retry"; then
+        _retry_supported="--retry 3"
+        if check_help_for "notspecified" "curl" "--continue-at"; then
+            # "-C -" tells curl to automatically find where to resume the download when retrying.
+            _retry_supported="--retry 3 -C -"
+        fi
+    fi
+
+    RETVAL="$_retry_supported"
+}
+
 # Return cipher suite string specified by user, otherwise return strong TLS 1.2-1.3 cipher suites
-# if support by local tools is detected. Detection currently supports these curl backends: 
+# if support by local tools is detected. Detection currently supports these curl backends:
 # GnuTLS and OpenSSL (possibly also LibreSSL and BoringSSL). Return value can be empty.
 get_ciphersuites_for_curl() {
     if [ -n "${RUSTUP_TLS_CIPHERSUITES-}" ]; then
@@ -618,7 +687,7 @@ get_ciphersuites_for_curl() {
 }
 
 # Return cipher suite string specified by user, otherwise return strong TLS 1.2-1.3 cipher suites
-# if support by local tools is detected. Detection currently supports these wget backends: 
+# if support by local tools is detected. Detection currently supports these wget backends:
 # GnuTLS and OpenSSL (possibly also LibreSSL and BoringSSL). Return value can be empty.
 get_ciphersuites_for_wget() {
     if [ -n "${RUSTUP_TLS_CIPHERSUITES-}" ]; then
@@ -643,10 +712,10 @@ get_ciphersuites_for_wget() {
     RETVAL="$_cs"
 }
 
-# Return strong TLS 1.2-1.3 cipher suites in OpenSSL or GnuTLS syntax. TLS 1.2 
-# excludes non-ECDHE and non-AEAD cipher suites. DHE is excluded due to bad 
+# Return strong TLS 1.2-1.3 cipher suites in OpenSSL or GnuTLS syntax. TLS 1.2
+# excludes non-ECDHE and non-AEAD cipher suites. DHE is excluded due to bad
 # DH params often found on servers (see RFC 7919). Sequence matches or is
-# similar to Firefox 68 ESR with weak cipher suites disabled via about:config.  
+# similar to Firefox 68 ESR with weak cipher suites disabled via about:config.
 # $1 must be openssl or gnutls.
 get_strong_ciphersuites_for() {
     if [ "$1" = "openssl" ]; then
@@ -656,7 +725,7 @@ get_strong_ciphersuites_for() {
         # GnuTLS isn't forgiving of unknown values, so this may require a GnuTLS version that supports TLS 1.3 even if wget doesn't.
         # Begin with SECURE128 (and higher) then remove/add to build cipher suites. Produces same 9 cipher suites as OpenSSL but in slightly different order.
         echo "SECURE128:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1:-VERS-DTLS-ALL:-CIPHER-ALL:-MAC-ALL:-KX-ALL:+AEAD:+ECDHE-ECDSA:+ECDHE-RSA:+AES-128-GCM:+CHACHA20-POLY1305:+AES-256-GCM"
-    fi 
+    fi
 }
 
 main "$@" || exit 1
