@@ -1,5 +1,6 @@
 #!/bin/sh
 # shellcheck shell=dash
+# shellcheck disable=SC2039  # local is non-POSIX
 
 # This is just a little script that can be downloaded from the internet to
 # install rustup. It just does platform detection, downloads the installer
@@ -8,14 +9,19 @@
 # It runs on Unix shells like {a,ba,da,k,z}sh. It uses the common `local`
 # extension. Note: Most shells limit `local` to 1 var per line, contra bash.
 
-if [ "$KSH_VERSION" = 'Version JM 93t+ 2010-03-05' ]; then
-    # The version of ksh93 that ships with many illumos systems does not
-    # support the "local" extension.  Print a message rather than fail in
-    # subtle ways later on:
-    echo 'rustup does not work with this ksh93 version; please try bash!' >&2
-    exit 1
-fi
+# Some versions of ksh have no `local` keyword. Alias it to `typeset`, but
+# beware this makes variables global with f()-style function syntax in ksh93.
+# mksh has this alias by default.
+has_local() {
+    # shellcheck disable=SC2034  # deliberately unused
+    local _has_local
+}
 
+has_local 2>/dev/null || alias local=typeset
+
+is_zsh() {
+    [ -n "${ZSH_VERSION-}" ]
+}
 
 set -u
 
@@ -25,48 +31,37 @@ RUSTUP_UPDATE_ROOT="https://mirrors.ustc.edu.cn/rust-static/rustup"
 # NOTICE: If you change anything here, please make the same changes in setup_mode.rs
 usage() {
     cat <<EOF
-rustup-init 1.26.0 (577bf51ae 2023-04-05)
+rustup-init 1.27.0 (b02c9c2b4 2024-03-08)
+
 The installer for rustup
 
-USAGE:
-    rustup-init [OPTIONS]
+Usage: rustup-init[EXE] [OPTIONS]
 
-OPTIONS:
-    -v, --verbose
-            Enable verbose output
-
-    -q, --quiet
-            Disable progress output
-
-    -y
-            Disable confirmation prompt.
-
-        --default-host <default-host>
-            Choose a default host triple
-
-        --default-toolchain <default-toolchain>
-            Choose a default toolchain to install. Use 'none' to not install any toolchains at all
-
-        --profile <profile>
-            [default: default] [possible values: minimal, default, complete]
-
-    -c, --component <components>...
-            Component name to also install
-
-    -t, --target <targets>...
-            Target name to also install
-
-        --no-update-default-toolchain
-            Don't update any existing default toolchain after install
-
-        --no-modify-path
-            Don't configure the PATH environment variable
-
-    -h, --help
-            Print help information
-
-    -V, --version
-            Print version information
+Options:
+  -v, --verbose
+          Enable verbose output
+  -q, --quiet
+          Disable progress output
+  -y
+          Disable confirmation prompt.
+      --default-host <default-host>
+          Choose a default host triple
+      --default-toolchain <default-toolchain>
+          Choose a default toolchain to install. Use 'none' to not install any toolchains at all
+      --profile <profile>
+          [default: default] [possible values: minimal, default, complete]
+  -c, --component <components>...
+          Component name to also install
+  -t, --target <targets>...
+          Target name to also install
+      --no-update-default-toolchain
+          Don't update any existing default toolchain after install
+      --no-modify-path
+          Don't configure the PATH environment variable
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 EOF
 }
 
@@ -240,6 +235,67 @@ get_endianness() {
     fi
 }
 
+# Detect the Linux/LoongArch UAPI flavor, with all errors being non-fatal.
+# Returns 0 or 234 in case of successful detection, 1 otherwise (/tmp being
+# noexec, or other causes).
+check_loongarch_uapi() {
+    need_cmd base64
+
+    local _tmp
+    if ! _tmp="$(ensure mktemp)"; then
+        return 1
+    fi
+
+    # Minimal Linux/LoongArch UAPI detection, exiting with 0 in case of
+    # upstream ("new world") UAPI, and 234 (-EINVAL truncated) in case of
+    # old-world (as deployed on several early commercial Linux distributions
+    # for LoongArch).
+    #
+    # See https://gist.github.com/xen0n/5ee04aaa6cecc5c7794b9a0c3b65fc7f for
+    # source to this helper binary.
+    ignore base64 -d > "$_tmp" <<EOF
+f0VMRgIBAQAAAAAAAAAAAAIAAgEBAAAAeAAgAAAAAABAAAAAAAAAAAAAAAAAAAAAQQAAAEAAOAAB
+AAAAAAAAAAEAAAAFAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAJAAAAAAAAAAkAAAAAAAAAAAA
+AQAAAAAABCiAAwUAFQAGABUAByCAAwsYggMAACsAC3iBAwAAKwAxen0n
+EOF
+
+    ignore chmod u+x "$_tmp"
+    if [ ! -x "$_tmp" ]; then
+        ignore rm "$_tmp"
+        return 1
+    fi
+
+    "$_tmp"
+    local _retval=$?
+
+    ignore rm "$_tmp"
+    return "$_retval"
+}
+
+ensure_loongarch_uapi() {
+    check_loongarch_uapi
+    case $? in
+        0)
+            return 0
+            ;;
+        234)
+            echo >&2
+            echo 'Your Linux kernel does not provide the ABI required by this Rust' >&2
+            echo 'distribution.  Please check with your OS provider for how to obtain a' >&2
+            echo 'compatible Rust package for your system.' >&2
+            echo >&2
+            exit 1
+            ;;
+        *)
+            echo "Warning: Cannot determine current system's ABI flavor, continuing anyway." >&2
+            echo >&2
+            echo 'Note that the official Rust distribution only works with the upstream' >&2
+            echo 'kernel ABI.  Installation will fail if your running kernel happens to be' >&2
+            echo 'incompatible.' >&2
+            ;;
+    esac
+}
+
 get_architecture() {
     local _ostype _cputype _bitness _arch _clibtype
     _ostype="$(uname -s)"
@@ -255,10 +311,30 @@ get_architecture() {
         fi
     fi
 
-    if [ "$_ostype" = Darwin ] && [ "$_cputype" = i386 ]; then
-        # Darwin `uname -m` lies
-        if sysctl hw.optional.x86_64 | grep -q ': 1'; then
-            _cputype=x86_64
+    if [ "$_ostype" = Darwin ]; then
+        # Darwin `uname -m` can lie due to Rosetta shenanigans. If you manage to
+        # invoke a native shell binary and then a native uname binary, you can
+        # get the real answer, but that's hard to ensure, so instead we use
+        # `sysctl` (which doesn't lie) to check for the actual architecture.
+        if [ "$_cputype" = i386 ]; then
+            # Handling i386 compatibility mode in older macOS versions (<10.15)
+            # running on x86_64-based Macs.
+            # Starting from 10.15, macOS explicitly bans all i386 binaries from running.
+            # See: <https://support.apple.com/en-us/HT208436>
+
+            # Avoid `sysctl: unknown oid` stderr output and/or non-zero exit code.
+            if sysctl hw.optional.x86_64 2> /dev/null || true | grep -q ': 1'; then
+                _cputype=x86_64
+            fi
+        elif [ "$_cputype" = x86_64 ]; then
+            # Handling x86-64 compatibility mode (a.k.a. Rosetta 2)
+            # in newer macOS versions (>=11) running on arm64-based Macs.
+            # Rosetta 2 is built exclusively for x86-64 and cannot run i386 binaries.
+
+            # Avoid `sysctl: unknown oid` stderr output and/or non-zero exit code.
+            if sysctl hw.optional.arm64 2> /dev/null || true | grep -q ': 1'; then
+                _cputype=arm64
+            fi
         fi
     fi
 
@@ -393,6 +469,7 @@ get_architecture() {
             ;;
         loongarch64)
             _cputype=loongarch64
+            ensure_loongarch_uapi
             ;;
         *)
             err "unknown CPU type: $_cputype"
@@ -446,8 +523,8 @@ get_architecture() {
     # and fall back to arm.
     # See https://github.com/rust-lang/rustup.rs/issues/587.
     if [ "$_ostype" = "unknown-linux-gnueabihf" ] && [ "$_cputype" = armv7 ]; then
-        if ensure grep '^Features' /proc/cpuinfo | grep -q -v neon; then
-            # At least one processor does not have NEON.
+        if ensure grep '^Features' /proc/cpuinfo | grep -E -q -v 'neon|simd'; then
+            # At least one processor does not have NEON (which is asimd on armv8+).
             _cputype=arm
         fi
     fi
@@ -497,6 +574,9 @@ ignore() {
 # This wraps curl or wget. Try curl first, if not installed,
 # use wget instead.
 downloader() {
+    # zsh does not split words by default, Required for curl retry arguments below.
+    is_zsh && setopt local_options shwordsplit
+
     local _dld
     local _ciphersuites
     local _err
