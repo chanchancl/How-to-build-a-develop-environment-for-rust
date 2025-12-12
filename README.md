@@ -2,21 +2,25 @@
 
 ## 前情提要
 
-由于众所周知的原因，如同golang一样，rust的官网虽然可以访问，但是速度却跟没有一样，为了快速正确的安装rust
+由于众所周知的原因，如同 golang 一样，rust 的官网虽然可以访问，但是速度却跟没有一样，为了快速正确的安装 rust
 
 这里将以前遇到的坑总结一下，并给出一份最简单的解决方案
 
+[Windows 版本](./README-window.md)
+
+## 基础知识
+
+rust 语言的基础工具有 2 个，`rustup` 与 `cargo`
+
+rustup：Rust 官方的工具链管理器，用于安装、更新、切换不同版本的 Rust 编译器（rustc）、标准库和工具以及跨平台目标。
+
+cargo：Rust 官方的构建系统和包管理器，负责编译代码、管理依赖、运行测试、生成文档和发布包。
+
 ## 准备步骤
 
-1. 下载rust安装脚本
+1. 下载 rust 安装脚本
 
-原版：
-
-```
-curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf > rust.sh && chmod +x rust.sh
-```
-
-USTC每天更新的(源已替换), 推荐:
+运行命令:
 
 ```
 curl --proto 'https' --tlsv1.2 https://mirrors.ustc.edu.cn/misc/rustup-install.sh -sSf > rust.sh && chmod +x rust.sh
@@ -24,8 +28,9 @@ curl --proto 'https' --tlsv1.2 https://mirrors.ustc.edu.cn/misc/rustup-install.s
 
 2. 设置环境变量
 
-**RUSTUP_DIST_SERVER**用于更新toolchain
-**RUSTUP_UPDATE_ROOT**用于更新rustup自身
+> **RUSTUP_UPDATE_ROOT**用于更新 rustup 自身 `rustup self update`
+
+> **RUSTUP_DIST_SERVER**用于更新 toolchain `rustup update`
 
 ```
 export RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static
@@ -41,16 +46,35 @@ export RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
 
 ## 检测
 
-1. 运行命令 `cargo version`, 若出现 cargo 1.80.1 (376290515 2024-07-16) (版本可能变化) 则说明安装成功
+### 检测 rustup
+
+运行命令 `rustup -V`, 输出应该类似下面：
+
+```
+rustup 1.28.2 (e4f3ad6f8 2025-04-28)
+info: This is the version for the rustup toolchain manager, not the rustc compiler.
+info: The currently active `rustc` version is `rustc 1.91.1 (ed61e7d7e 2025-11-07)`
+```
+
+### 检测 cargo
+
+运行命令 `cargo -V`, 输出应类似：
+
+```
+cargo 1.91.1 (ea2d97820 2025-10-10)
+```
 
 # 软件源
 
-rust的第三方包也需要根据dependency从网络上下载，可以通过修改 ~/.cargo/config.toml 来修改源
+成功安装 rustup 与 cargo 之后，我们要解决软件源的问题（类似 python 的 pip）
 
+rust 的第三方包也需要根据 dependency 从网络上下载，可以通过修改 ~/.cargo/config.toml 来修改源
 
 ## 稀疏索引（推荐）
 
-cargo 1.68 版本开始支持稀疏索引：不再需要完整克隆 crates.io-index 仓库，可以加快获取包的速度。如果您的 cargo 版本大于等于 1.68，可以在 $HOME/.cargo/config。toml 中添加如下内容：
+cargo 1.68 版本开始支持稀疏索引：不再需要完整克隆 crates.io-index 仓库，可以加快获取包的速度。如果您的 cargo 版本大于等于 1.68，可以在 $CARGO_HOME/config.toml 中添加如下内容：
+
+> $CARGO_HOME 默认为 ~/.cargo
 
 ```
 [source.crates-io]
@@ -58,28 +82,30 @@ replace-with = 'ustc'
 
 [source.ustc]
 registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
+
+[registries.ustc]
+index = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
 ```
 
-## 常规修改
+如果 build 时出错，可以尝试 `export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt`
 
+## 尝试构建
 
-如果你的cargo版本小于 1.6.8，可以如下修改 ~/.cargo/config.toml
+通过 `cargo new hello_world && cd hello_world` 创建项目并进入
 
-目前来说，该方法比稀疏索引慢很多，所以强烈推荐升级cargo版本
+运行 `cargo run` 检测输出是否正确
 
 ```
-[source.crates-io]
-replace-with = 'ustc'
-
-[source.ustc]
-registry = "git://mirrors.ustc.edu.cn/crates.io-index"
+>> cargo run
+   Compiling hello_world v0.1.0 (xxx\hello_world)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target\debug\hello_world.exe`
+Hello, world!
 ```
 
-如果build时出错，可以尝试 `export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt`
-
-# 参考文献
+## 参考文献
 
 更多内容请参考
 
-* https://mirrors.ustc.edu.cn/help/rust-static.html
-* https://mirrors.ustc.edu.cn/help/crates.io-index.html
+- https://mirrors.ustc.edu.cn/help/rust-static.html
+- https://mirrors.ustc.edu.cn/help/crates.io-index.html
