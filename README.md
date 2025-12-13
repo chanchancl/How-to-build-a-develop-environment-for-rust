@@ -109,3 +109,5 @@ Hello, world!
 
 - https://mirrors.ustc.edu.cn/help/rust-static.html
 - https://mirrors.ustc.edu.cn/help/crates.io-index.html
+- https://course.rs/first-try/installation.html
+- https://course.rs/first-try/slowly-downloading.html

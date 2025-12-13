@@ -12,7 +12,7 @@
 
 运行 rustup-init.exe
 
-因为 rust 在 windows 上编译依赖 windows-msvc toolchain，所以你可能同时需要安装 MSVC
+因为 rust 在 windows 上编译依赖 [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/zh-hans/visual-cpp-build-tools/)，所以你可能需要同时安装
 
 # 检测
 
