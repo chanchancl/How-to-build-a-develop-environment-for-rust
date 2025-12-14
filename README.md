@@ -18,9 +18,7 @@ cargo：Rust 官方的构建系统和包管理器，负责编译代码、管理�
 
 ## 准备步骤
 
-1. 下载 rust 安装脚本
-
-运行命令:
+1. 下载 rust 安装脚本，运行命令:
 
 ```
 curl --proto 'https' --tlsv1.2 https://mirrors.ustc.edu.cn/misc/rustup-install.sh -sSf > rust.sh && chmod +x rust.sh
@@ -41,14 +39,14 @@ export RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup
 
 ## 安装
 
-1. 运行命令 `sudo bash rust.sh`, 并输入回车选择 default 安装
+1. 运行命令 `sudo bash rust.sh`， 并输入回车选择 default 安装
 2. 等待安装完成
 
 ## 检测
 
 ### 检测 rustup
 
-运行命令 `rustup -V`, 输出应该类似下面：
+运行命令 `rustup -V`， 输出应该类似下面：
 
 ```
 rustup 1.28.2 (e4f3ad6f8 2025-04-28)
@@ -58,7 +56,7 @@ info: The currently active `rustc` version is `rustc 1.91.1 (ed61e7d7e 2025-11-0
 
 ### 检测 cargo
 
-运行命令 `cargo -V`, 输出应类似：
+运行命令 `cargo -V`， 输出应类似：
 
 ```
 cargo 1.91.1 (ea2d97820 2025-10-10)
